@@ -1,0 +1,24 @@
+{
+  "train_rows": 1040874,
+  "validation_rows": 184214,
+  "predict_rows": 177923,
+  "validation_start": "2015-07-01",
+  "selected_model": "user_history_mean",
+  "indicator_precision": 0.31454534200977097,
+  "indicator_passed_posts": 141515,
+  "math_sign_precision": -0.36839156848325644,
+  "math_sign_passed_posts": 141515,
+  "candidate_metrics": {
+    "user_history_mean": {
+      "indicator_precision": 0.31454534200977097,
+      "math_sign_precision": -0.36839156848325644
+    }
+  },
+  "notes": [
+    "The local metric uses abs((pred-real)/(real+5)) based on competition writeups.",
+    "The indicator version is closer to archived descriptions where sign behaves like 1/0.",
+    "The math_sign version is included because the supplied formula defines sign as -1/0/1.",
+    "The default baseline predicts per-user mean interactions from historical posts.",
+    "The optional text model is blended in only if it improves the validation score."
+  ]
+}

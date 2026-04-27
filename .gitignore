@@ -1,0 +1,11 @@
+.DS_Store
+.venv/
+WORKPLAN.md
+Weibo Data/*.txt
+!Weibo Data/.gitkeep
+artifacts_history/
+artifacts_smoke/
+artifacts_text_smoke/
+train_baseline copy.txt
+__pycache__/
+*.pyc
