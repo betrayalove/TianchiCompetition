@@ -2,6 +2,8 @@
 
 This workspace contains a reproducible baseline for the Tianchi Weibo interaction prediction task.
 
+Link ---> https://tianchi.aliyun.com/competition/entrance/231574/team
+
 ## What the task is
 
 For each post, predict three targets:
