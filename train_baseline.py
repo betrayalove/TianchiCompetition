@@ -76,6 +76,36 @@ def history_baseline_from_features(df: pd.DataFrame) -> pd.DataFrame:
     return baseline
 
 
+def user_recent_quantile_baseline(
+    history_df: pd.DataFrame,
+    target_df: pd.DataFrame,
+    quantile: float = 0.58,
+    recent_days: int = 30,
+) -> pd.DataFrame:
+    recent_start = history_df["time"].max() - pd.Timedelta(days=recent_days)
+    recent_df = history_df.loc[history_df["time"] >= recent_start]
+    stats = recent_df.groupby("uid", observed=True)[TARGET_COLUMNS].quantile(quantile).reset_index()
+    merged = target_df[["uid"]].merge(stats, on="uid", how="left")
+    return pd.DataFrame(
+        {
+            column: merged[column].fillna(0.0).round().clip(lower=0).astype("int32")
+            for column in TARGET_COLUMNS
+        }
+    )
+
+
+def apply_result11_scales(pred: pd.DataFrame) -> pd.DataFrame:
+    transforms = {
+        "forward_count": 1.1,
+        "comment_count": 0.8,
+        "like_count": 1.0,
+    }
+    out = pred.copy()
+    for column, scale in transforms.items():
+        out[column] = clip_and_round_predictions(out[column].to_numpy(dtype=np.float64) * scale)
+    return out
+
+
 def blend_predictions(left: pd.DataFrame, right: pd.DataFrame, right_weight: float) -> pd.DataFrame:
     out = pd.DataFrame()
     for column in TARGET_COLUMNS:
@@ -84,6 +114,22 @@ def blend_predictions(left: pd.DataFrame, right: pd.DataFrame, right_weight: flo
         )
         out[column] = clip_and_round_predictions(blended)
     return out
+
+
+def write_three_column_submission(
+    submission_path: Path,
+    predict_df: pd.DataFrame,
+    pred: pd.DataFrame,
+) -> None:
+    submission = predict_df[["uid", "mid"]].copy()
+    submission["counts"] = (
+        pred["forward_count"].astype("int32").astype(str)
+        + ","
+        + pred["comment_count"].astype("int32").astype(str)
+        + ","
+        + pred["like_count"].astype("int32").astype(str)
+    )
+    submission.to_csv(submission_path, sep="\t", index=False, header=False)
 
 
 def main() -> None:
@@ -117,6 +163,19 @@ def main() -> None:
         "math_sign_precision": history_math.precision,
     }
 
+    result11_valid_pred = apply_result11_scales(user_recent_quantile_baseline(fit_df, valid_df))
+    result11_test_pred = apply_result11_scales(user_recent_quantile_baseline(train_df, predict_df))
+    result11_indicator = competition_precision(valid_df[TARGET_COLUMNS], result11_valid_pred, sign_mode="indicator")
+    result11_math = competition_precision(valid_df[TARGET_COLUMNS], result11_valid_pred, sign_mode="math_sign")
+    all_metrics["recent30_q58_result11"] = {
+        "indicator_precision": result11_indicator.precision,
+        "math_sign_precision": result11_math.precision,
+    }
+    if result11_indicator.precision >= history_indicator.precision:
+        valid_pred = result11_valid_pred
+        test_pred = result11_test_pred
+        selected_model = "recent30_q58_result11"
+
     if args.enable_text_model:
         train_x, vectorizer = build_sparse_design_matrix(fit_features)
         valid_x, _ = build_sparse_design_matrix(valid_features, vectorizer=vectorizer)
@@ -140,7 +199,8 @@ def main() -> None:
             "indicator_precision": blend_indicator.precision,
             "math_sign_precision": blend_math.precision,
         }
-        if blend_indicator.precision >= history_indicator.precision:
+        selected_indicator = competition_precision(valid_df[TARGET_COLUMNS], valid_pred, sign_mode="indicator")
+        if blend_indicator.precision >= selected_indicator.precision:
             valid_pred = blended_valid
             test_pred = blended_test
             selected_model = "history_plus_text_blend"
@@ -148,18 +208,15 @@ def main() -> None:
     indicator_metric = competition_precision(valid_df[TARGET_COLUMNS], valid_pred, sign_mode="indicator")
     math_sign_metric = competition_precision(valid_df[TARGET_COLUMNS], valid_pred, sign_mode="math_sign")
 
-    submission = predict_df[["uid", "mid"]].copy()
-    for column in TARGET_COLUMNS:
-        submission[column] = test_pred[column].astype("int32")
-
-    submission_path = output_dir / "submission_baseline.txt"
-    submission.to_csv(submission_path, sep="\t", index=False, header=False)
+    submission_path = output_dir / "result.txt"
+    write_three_column_submission(submission_path, predict_df, test_pred)
 
     report = {
         "train_rows": int(len(fit_df)),
         "validation_rows": int(len(valid_df)),
         "predict_rows": int(len(predict_df)),
         "validation_start": args.validation_start,
+        "submission_path": str(submission_path),
         "selected_model": selected_model,
         "indicator_precision": indicator_metric.precision,
         "indicator_passed_posts": indicator_metric.passed_posts,
@@ -170,7 +227,8 @@ def main() -> None:
             "The local metric uses abs((pred-real)/(real+5)) based on competition writeups.",
             "The indicator version is closer to archived descriptions where sign behaves like 1/0.",
             "The math_sign version is included because the supplied formula defines sign as -1/0/1.",
-            "The default baseline predicts per-user mean interactions from historical posts.",
+            "The default submission uses the result11 recent 30-day q58 recipe.",
+            "The submission format is uid, mid, and a comma-separated forward/comment/like triplet.",
             "The optional text model is blended in only if it improves the validation score.",
         ],
     }
